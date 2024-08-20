@@ -1,0 +1,8 @@
+﻿Create Database ParcelDB
+
+Use ParcelDB
+
+Create Table ParcelTable
+(ParcelNumber varchar(100), ParNumber varchar(100), DocName varchar(100), DocName1 varchar(100)) 
+
+Select * from ParcelTable
