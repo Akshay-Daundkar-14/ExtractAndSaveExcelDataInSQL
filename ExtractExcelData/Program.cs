@@ -10,6 +10,10 @@ using System.Data.SqlClient;
 using System.IO;
 using ClosedXML.Excel;
 using DocumentFormat.OpenXml.Bibliography;
+using Irony.Parsing;
+using System.Threading.Tasks;
+using PuppeteerSharp;
+using PuppeteerSharp.Media;
 
 namespace ExtractExcelData
 {
@@ -23,7 +27,7 @@ namespace ExtractExcelData
 
             InsertParcelDataIntoDatabase(parcelData);
 
-          
+
 
 
             var options = new ChromeOptions();
@@ -66,7 +70,7 @@ namespace ExtractExcelData
             {
                 ExcelWorksheet worksheet = package.Workbook.Worksheets["Sheet1"];
                 int rowCount = worksheet.Dimension.Rows;
-                
+
                 for (int row = 2; row <= rowCount; row++)
                 {
                     Parcel parcel = new Parcel();
@@ -132,65 +136,61 @@ namespace ExtractExcelData
 
 
         // Fetch And Save Parcel Data
+
         public static void FetchAndSaveParcelData(IWebDriver driver, string parcelNumber)
         {
 
-            //driver.Manage().Timeouts().PageLoad = TimeSpan.FromSeconds(120); // Increase the timeout for page load
-            driver.Manage().Timeouts().PageLoad = TimeSpan.FromMinutes(2);
-            driver.Manage().Timeouts().AsynchronousJavaScript = TimeSpan.FromSeconds(60);
+            // Set a longer command timeout if needed
+            var options = new ChromeOptions();
+            options.ScriptTimeout = TimeSpan.FromMinutes(3);
 
-            // var wait = new WebDriverWait(driver, TimeSpan.FromMinutes(2));
+            // Set timeouts
+            driver.Manage().Timeouts().PageLoad = TimeSpan.FromMinutes(3); // Increase the timeout for page load
+            driver.Manage().Timeouts().AsynchronousJavaScript = TimeSpan.FromSeconds(60);
 
             // Step 1: Open the URL
             driver.Navigate().GoToUrl("https://treasurer.pinal.gov/ParcelInquiry/");
 
-            // Step 2: Enter Parcel Number and Submit 
+            // Step 2: Wait for a specific element to be visible
+            WebDriverWait wait = new WebDriverWait(driver, TimeSpan.FromMinutes(3));
+            wait.Until(ExpectedConditions.ElementIsVisible(By.ClassName("k-input-inner")));
 
+            // Step 3: Enter Parcel Number and Submit
             var parcelInput = driver.FindElement(By.ClassName("k-input-inner"));
             parcelInput.SendKeys(parcelNumber);
             var submitButton = driver.FindElement(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[2]/div/div[1]/form/div/input[1]"));
             submitButton.Click();
 
+            // Step 4: Wait for the payment history link to be clickable
+            wait.Until(ExpectedConditions.ElementToBeClickable(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[1]/ul/li[1]/ul/li[4]/a")));
 
             var paymentHistory = driver.FindElement(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[1]/ul/li[1]/ul/li[4]/a"));
             paymentHistory.Click();
 
-
-            // Year Dropdown
-
+            // Step 5: Year Dropdown
+            wait.Until(ExpectedConditions.ElementToBeClickable(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[2]/form/table/tbody/tr/td[2]/span/span[2]")));
             var yearDropdown = driver.FindElement(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[2]/form/table/tbody/tr/td[2]/span/span[2]"));
             yearDropdown.Click();
 
-
-
-            //--------- Drop-Down Option ------------
-
+            // Step 6: Select Year Option using JavaScript
             var yearOption = driver.FindElement(By.XPath(@"/html/body/div[2]/div/div/div[2]/ul/li[3]/span"));
-
-            // Use JavaScript to click the year option
             IJavaScriptExecutor jsExecutor = (IJavaScriptExecutor)driver;
             jsExecutor.ExecuteScript("arguments[0].click();", yearOption);
 
+            // After the page loads, save it as a PDF
+            //SavePageAsPdf(driver.Url, parcelNumber).Wait();
 
-            //--------- Extract Data -----------
-
-            // Find the table rows
-
+            // Step 7: Extract Data
+            wait.Until(ExpectedConditions.ElementIsVisible(By.ClassName("k-master-row")));
             var rows = driver.FindElements(By.ClassName("k-master-row"));
-
-            // Create a list to hold the extracted data
-            //List<PaymentData> payments = new List<PaymentData>();
 
             foreach (var row in rows)
             {
-                // Extract the relevant data from each cell
                 var batchNumber = row.FindElement(By.CssSelector("td:nth-child(3)")).Text;
                 var paymentDate = row.FindElement(By.CssSelector("td:nth-child(4)")).Text;
                 var interestDate = row.FindElement(By.CssSelector("td:nth-child(5)")).Text;
                 var payee = row.FindElement(By.CssSelector("td:nth-child(6)")).Text;
                 var batchAmount = row.FindElement(By.CssSelector("td:nth-child(7)")).Text;
-
-
 
                 // Save Data to Database 
                 SaveToDatabase(new PaymentData
@@ -203,8 +203,78 @@ namespace ExtractExcelData
                     BatchAmount = batchAmount
                 });
             }
-
         }
+
+
+        public static async Task SavePageAsPdf(string url, string parcelNumber)
+        {
+            // Define the path where PDFs should be saved
+            string pdfDirectory = @"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\pdfs";
+
+            // Ensure the directory exists
+            if (!Directory.Exists(pdfDirectory))
+            {
+                Directory.CreateDirectory(pdfDirectory);
+            }
+
+            // Generate a file name based on the parcel number
+            string pdfFilePath = Path.Combine(pdfDirectory, $"{parcelNumber}_payment_history.pdf");
+
+            // Set the path to your Chrome or Chromium installation
+            var launchOptions = new LaunchOptions
+            {
+                Headless = true,
+                ExecutablePath = @"C:\Program Files\Google\Chrome\Application\chrome.exe", // Update this path accordingly
+                DefaultViewport = new ViewPortOptions
+                {
+                    Width = 1920,
+                    Height = 1080
+                }
+            };
+
+            var browser = await Puppeteer.LaunchAsync(launchOptions);
+            var page = await browser.NewPageAsync();
+
+            try
+            {
+                // Increase timeout duration
+                page.DefaultNavigationTimeout = 60000; // Set the timeout to 60 seconds
+
+                // Navigate to the page with increased timeout
+                await page.GoToAsync(url, new NavigationOptions
+                {
+                    Timeout = 60000, // Set the navigation timeout to 60 seconds
+                    WaitUntil = new[] { WaitUntilNavigation.Networkidle2 } // Wait until network activity is idle
+                });
+
+                // Save the page as a PDF
+                await page.PdfAsync(pdfFilePath, new PdfOptions
+                {
+                    Format = PaperFormat.A4,
+                    PrintBackground = true,
+                });
+
+                Console.WriteLine($"PDF saved successfully at {pdfFilePath}!");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"An error occurred: {ex.Message}");
+            }
+            finally
+            {
+                // Dispose of resources to ensure everything is cleaned up
+                if (page != null)
+                {
+                    await page.CloseAsync();
+                }
+
+                if (browser != null)
+                {
+                    await browser.CloseAsync();
+                }
+            }
+        }
+
 
 
         // Save data to excel
