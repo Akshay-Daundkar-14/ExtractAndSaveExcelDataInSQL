@@ -5,4 +5,16 @@ Use ParcelDB
 Create Table ParcelTable
 (ParcelNumber varchar(100), ParNumber varchar(100), DocName varchar(100), DocName1 varchar(100)) 
 
+
+CREATE TABLE PaymentHistory (
+    Id INT PRIMARY KEY IDENTITY(1,1),
+    ParcelNumber NVARCHAR(50),
+    BatchNumber NVARCHAR(50),
+    PaymentDate NVARCHAR(50),
+    InterestDate NVARCHAR(50),
+    BatchAmount NVARCHAR(50)
+);
+
+Select * from PaymentHistory
+
 Select * from ParcelTable
