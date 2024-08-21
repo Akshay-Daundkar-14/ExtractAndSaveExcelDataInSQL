@@ -289,19 +289,6 @@ namespace ExtractExcelData
             }
 
 
-
-            // Output the extracted data
-            //foreach (var payment in payments)
-            //{
-            //    Console.WriteLine($"Parcel Number : {parcelNumber}");
-            //    Console.WriteLine($"Batch #: {payment.BatchNumber}");
-            //    Console.WriteLine($"Payment Date: {payment.PaymentDate}");
-            //    Console.WriteLine($"Interest Date: {payment.InterestDate}");
-            //    Console.WriteLine($"Payee: {payment.Payee}");
-            //    Console.WriteLine($"Batch Amount: {payment.BatchAmount}");
-            //    Console.WriteLine("-------------------------------------");
-            //}
-
             return payments;
         }
 
