@@ -2,19 +2,22 @@
 
 Use ParcelDB
 
-Create Table ParcelTable
-(ParcelNumber varchar(100), ParNumber varchar(100), DocName varchar(100), DocName1 varchar(100)) 
 
-
-CREATE TABLE PaymentHistory (
-    Id INT PRIMARY KEY IDENTITY(1,1),
-    ParcelNumber NVARCHAR(50),
-    BatchNumber NVARCHAR(50),
-    PaymentDate NVARCHAR(50),
-    InterestDate NVARCHAR(50),
-    BatchAmount NVARCHAR(50)
+CREATE TABLE PaymentHistory1 (
+    ID INT IDENTITY(1,1) PRIMARY KEY, 
+    ParcelID VARCHAR(20),            
+    LastPaymentAmount VARCHAR(20),
+    LastPaymentDate VARCHAR(20),        
+    FiscalTaxYearPayments VARCHAR(20),
+    PriorCalendarYearPayments VARCHAR(20), 
+    CurrentCalendarYearPayments VARCHAR(20), 
 );
 
-Select * from PaymentHistory
-
-Select * from ParcelTable
+SELECT TOP (1000) [ID]
+      ,[ParcelID]
+      ,[LastPaymentAmount]
+      ,[LastPaymentDate]
+      ,[FiscalTaxYearPayments]
+      ,[PriorCalendarYearPayments]
+      ,[CurrentCalendarYearPayments]
+  FROM [ParcelDB].[dbo].[PaymentHistory1]
