@@ -14,6 +14,9 @@ using Irony.Parsing;
 using System.Threading.Tasks;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
+using DinkToPdf;
+using ExtractExcelData.Models;
+using System.Linq;
 
 namespace ExtractExcelData
 {
@@ -23,191 +26,244 @@ namespace ExtractExcelData
         {
             Console.WriteLine("------------------- Start ----------------");
 
-            var parcelData = LoadParcelNumbers("D:\\Temp\\Akshay\\ExtractDataFromExcel\\ExtractExcelData\\ExcelData_Aug192024.xlsx");
+            // Read Excel Data
+            Console.WriteLine("Reading records from excel started...");
+            string filePath = @"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\Excel\Input\ParcelData.xlsx";
+            var parcelRecords = ReadParcelData(filePath);
+            Console.WriteLine("Reading records from excel ends...");
 
-            InsertParcelDataIntoDatabase(parcelData);
 
-
-
-
-            var options = new ChromeOptions();
-            options.AddUserProfilePreference("download.default_directory", Path.GetFullPath(@"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\temp"));
-
-            using (IWebDriver driver = new ChromeDriver(options))
+            foreach (var parcelRecord in parcelRecords)
             {
-                foreach (var data in parcelData)
-                {
-                    Console.WriteLine(data.ParcelNumber);
-                    // InsertParcelDataIntoDatabase(data.ParcelNumber, data.ParNumber, data.DocName, data.DocName1);
-                    FetchAndSaveParcelData(driver, data.ParcelNumber);
+                Console.WriteLine($"------------------- Scrapping start for parcel number - {parcelRecord.ParcelNumber}  ----------------");
+                WebScrapper(parcelRecord.ParcelNumber);
+                Console.WriteLine($"-------------------  Scrapping end for parcel number - {parcelRecord.ParcelNumber}  ----------------");
 
-                }
-
-                // Close the browser
-                driver.Quit();
+                Console.WriteLine("Save page as pdf started...");
+                SavePageAsPdf(parcelRecord.ParcelNumber, parcelRecord.DocName);
+                Console.WriteLine("Save page as pdf ends...");
             }
 
 
-            // Retrieve from database
-            var paymentData = RetrieveFromDatabase();
 
-            // Save to Excel
-            SaveToExcel(paymentData);
+
+            // Save Output data to excel
+            Console.WriteLine("Getting Payment Histories started...");
+            var paymentHistories = GetAllPaymentHistories();
+            Console.WriteLine("Getting Payment Histories ends...");
+
+
+            Console.WriteLine("------------------- Saving Output data to excel stared ----------------");
+            SaveToExcel(paymentHistories);
+            Console.WriteLine("------------------- Saving Output data to excel ends ----------------");
 
             Console.WriteLine("------------------- End ----------------");
 
             Console.ReadLine();
         }
 
+        //---------------------------------------------------------------
 
-        // Extract Parcel Number from Excel
-        public static List<Parcel> LoadParcelNumbers(string excelFilePath)
+
+        public static void WebScrapper(string parcelNumber)
         {
-            //var parcelData = new List<(string, string)>();
-            var parcelData = new List<Parcel>();
 
-            using (var package = new ExcelPackage(new FileInfo(excelFilePath)))
+            // Initialize ChromeDriver
+            IWebDriver driver = new ChromeDriver();
+
+            try
             {
-                ExcelWorksheet worksheet = package.Workbook.Worksheets["Sheet1"];
-                int rowCount = worksheet.Dimension.Rows;
+                // Navigate to the page
+                driver.Navigate().GoToUrl("https://trweb.co.clark.nv.us");
 
-                for (int row = 2; row <= rowCount; row++)
-                {
-                    Parcel parcel = new Parcel();
-                    parcel.ParcelNumber = worksheet.Cells[row, 1].Value?.ToString().Trim();
-                    parcel.ParNumber = worksheet.Cells[row, 2].Value?.ToString().Trim();
-                    parcel.DocName = worksheet.Cells[row, 3].Value?.ToString().Trim();
-                    parcel.DocName1 = worksheet.Cells[row, 4].Value?.ToString().Trim();
+                // Enter Parcel ID
+                var parcelInput = driver.FindElement(By.XPath(@"/html/body/div[1]/center/table/tbody/tr[2]/td[2]/table[3]/tbody/tr[2]/td/table/tbody/tr[1]/td[1]/form/table/tbody/tr[1]/td[1]/table/tbody/tr/td[2]/input"));
+                parcelInput.SendKeys(parcelNumber);
 
-                    if (!string.IsNullOrEmpty(parcel.ParcelNumber) && !string.IsNullOrEmpty(parcel.DocName))
-                    {
-                        parcelData.Add(parcel);
-                    }
-                }
+                // Submit the form
+                var submitButton = driver.FindElement(By.Name("Submit"));
+                submitButton.Click();
+
+                // Wait for the page to load (adjust time as needed)
+                System.Threading.Thread.Sleep(3000);
+
+
+                // Extract the required data
+                var lastPaymentAmount = driver.FindElement(By.XPath("//td[contains(text(), 'Last Payment Amount')]/following-sibling::td")).Text.Trim();
+                var lastPaymentDate = driver.FindElement(By.XPath("//td[contains(text(), 'Last Payment Date')]/following-sibling::td")).Text.Trim();
+                var fiscalTaxYearPayments = driver.FindElement(By.XPath("//td[contains(text(), 'Fiscal Tax Year Payments')]/following-sibling::td")).Text.Trim();
+                var priorCalendarYearPayments = driver.FindElement(By.XPath("//td[contains(text(), 'Prior Calendar Year Payments')]/following-sibling::td")).Text.Trim();
+                var currentCalendarYearPayments = driver.FindElement(By.XPath("//td[contains(text(), 'Current Calendar Year Payments')]/following-sibling::td")).Text.Trim();
+
+
+                // Save data to SQL Server
+                SaveDataToSql(parcelNumber, lastPaymentAmount, lastPaymentDate, fiscalTaxYearPayments, priorCalendarYearPayments, currentCalendarYearPayments);
+
+                Console.WriteLine("------------- Scrapping data saved to database -------------");
+
+                // Get the page URL after navigation
+                //return driver.Url;
+
+            }
+            finally
+            {
+                // Quit the browser
+                driver.Quit();
             }
 
-            return parcelData;
         }
 
 
-        // Save data in Database
-        public static void InsertParcelDataIntoDatabase(List<Parcel> parcelData)
+        static void SaveDataToSql(string parcelNumber, string lastPaymentAmount, string lastPaymentDate, string fiscalTaxYearPayments, string priorCalendarYearPayments, string currentCalendarYearPayments)
         {
-            try
+            string connectionString = "server=LAPTOP-S2EFS1EF\\SQLEXPRESS;database=ParcelDB;Integrated Security=true;";
+            using (SqlConnection connection = new SqlConnection(connectionString))
             {
+                connection.Open();
 
+                string query = "INSERT INTO PaymentHistory1 (ParcelID,LastPaymentAmount, LastPaymentDate, FiscalTaxYearPayments, PriorCalendarYearPayments, CurrentCalendarYearPayments) " +
+                               "VALUES (@ParcelID,@LastPaymentAmount, @LastPaymentDate, @FiscalTaxYearPayments, @PriorCalendarYearPayments, @CurrentCalendarYearPayments)";
 
-                string connectionString = "server=LAPTOP-S2EFS1EF\\SQLEXPRESS;database=ParcelDB;trusted_connection=true;";
-
-                using (SqlConnection connection = new SqlConnection(connectionString))
+                using (SqlCommand command = new SqlCommand(query, connection))
                 {
-                    connection.Open();
+                    command.Parameters.AddWithValue("@ParcelID", parcelNumber);
+                    command.Parameters.AddWithValue("@LastPaymentAmount", lastPaymentAmount);
+                    command.Parameters.AddWithValue("@LastPaymentDate", lastPaymentDate);
+                    command.Parameters.AddWithValue("@FiscalTaxYearPayments", fiscalTaxYearPayments);
+                    command.Parameters.AddWithValue("@PriorCalendarYearPayments", priorCalendarYearPayments);
+                    command.Parameters.AddWithValue("@CurrentCalendarYearPayments", currentCalendarYearPayments);
 
-                    using (SqlCommand command = new SqlCommand())
+                    command.ExecuteNonQuery();
+                }
+            }
+        }
+
+
+
+        public static List<PaymentHistory> GetAllPaymentHistories()
+        {
+            string connectionString = "server=LAPTOP-S2EFS1EF\\SQLEXPRESS;database=ParcelDB;Integrated Security=true;";
+            var paymentHistories = new List<PaymentHistory>();
+
+            using (SqlConnection connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+
+                string query = "SELECT * FROM PaymentHistory1";
+
+                using (SqlCommand command = new SqlCommand(query, connection))
+                {
+                    using (SqlDataReader reader = command.ExecuteReader())
                     {
-                        command.Connection = connection;
-                        command.CommandText = @"
-                INSERT INTO ParcelTable (ParcelNumber, ParNumber, DocName, DocName1) 
-                VALUES (@ParcelNumber, @ParNumber, @DocName, @DocName1)";
-
-                        // Add parameters
-                        command.Parameters.Add("@ParcelNumber", SqlDbType.VarChar);
-                        command.Parameters.Add("@ParNumber", SqlDbType.VarChar);
-                        command.Parameters.Add("@DocName", SqlDbType.VarChar);
-                        command.Parameters.Add("@DocName1", SqlDbType.VarChar);
-
-                        foreach (var record in parcelData)
+                        while (reader.Read())
                         {
-                            command.Parameters["@ParcelNumber"].Value = record.ParcelNumber;
-                            command.Parameters["@ParNumber"].Value = record.ParNumber;
-                            command.Parameters["@DocName"].Value = record.DocName;
-                            command.Parameters["@DocName1"].Value = record.DocName1;
+                            var paymentHistory = new PaymentHistory
+                            {
+                                ParcelID = reader["ParcelID"].ToString(),
+                                LastPaymentAmount = reader["LastPaymentAmount"].ToString(),
+                                LastPaymentDate = reader["LastPaymentDate"].ToString(),
+                                FiscalTaxYearPayments = reader["FiscalTaxYearPayments"].ToString(),
+                                PriorCalendarYearPayments = reader["PriorCalendarYearPayments"].ToString(),
+                                CurrentCalendarYearPayments = reader["CurrentCalendarYearPayments"].ToString()
+                            };
 
-                            command.ExecuteNonQuery();
+                            paymentHistories.Add(paymentHistory);
                         }
                     }
                 }
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine(ex.Message.ToString());
-            }
+
+            return paymentHistories;
         }
 
-
-        // Fetch And Save Parcel Data
-
-        public static void FetchAndSaveParcelData(IWebDriver driver, string parcelNumber)
+        static void SaveToExcel(List<PaymentHistory> payments)
         {
+            // Specify the directory where you want to save the Excel file
+            string directoryPath = @"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\Excel\Output\";
 
-            // Set a longer command timeout if needed
-            var options = new ChromeOptions();
-            options.ScriptTimeout = TimeSpan.FromMinutes(3);
-
-            // Set timeouts
-            driver.Manage().Timeouts().PageLoad = TimeSpan.FromMinutes(3); // Increase the timeout for page load
-            driver.Manage().Timeouts().AsynchronousJavaScript = TimeSpan.FromSeconds(60);
-
-            // Step 1: Open the URL
-            driver.Navigate().GoToUrl("https://treasurer.pinal.gov/ParcelInquiry/");
-
-            // Step 2: Wait for a specific element to be visible
-            WebDriverWait wait = new WebDriverWait(driver, TimeSpan.FromMinutes(3));
-            wait.Until(ExpectedConditions.ElementIsVisible(By.ClassName("k-input-inner")));
-
-            // Step 3: Enter Parcel Number and Submit
-            var parcelInput = driver.FindElement(By.ClassName("k-input-inner"));
-            parcelInput.SendKeys(parcelNumber);
-            var submitButton = driver.FindElement(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[2]/div/div[1]/form/div/input[1]"));
-            submitButton.Click();
-
-            // Step 4: Wait for the payment history link to be clickable
-            wait.Until(ExpectedConditions.ElementToBeClickable(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[1]/ul/li[1]/ul/li[4]/a")));
-
-            var paymentHistory = driver.FindElement(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[1]/ul/li[1]/ul/li[4]/a"));
-            paymentHistory.Click();
-
-            // Step 5: Year Dropdown
-            wait.Until(ExpectedConditions.ElementToBeClickable(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[2]/form/table/tbody/tr/td[2]/span/span[2]")));
-            var yearDropdown = driver.FindElement(By.XPath(@"/html/body/div[1]/section/table/tbody/tr/td[2]/form/table/tbody/tr/td[2]/span/span[2]"));
-            yearDropdown.Click();
-
-            // Step 6: Select Year Option using JavaScript
-            var yearOption = driver.FindElement(By.XPath(@"/html/body/div[2]/div/div/div[2]/ul/li[3]/span"));
-            IJavaScriptExecutor jsExecutor = (IJavaScriptExecutor)driver;
-            jsExecutor.ExecuteScript("arguments[0].click();", yearOption);
-
-            // After the page loads, save it as a PDF
-            //SavePageAsPdf(driver.Url, parcelNumber).Wait();
-
-            // Step 7: Extract Data
-            wait.Until(ExpectedConditions.ElementIsVisible(By.ClassName("k-master-row")));
-            var rows = driver.FindElements(By.ClassName("k-master-row"));
-
-            foreach (var row in rows)
+            // Ensure the directory exists, if not, create it
+            if (!System.IO.Directory.Exists(directoryPath))
             {
-                var batchNumber = row.FindElement(By.CssSelector("td:nth-child(3)")).Text;
-                var paymentDate = row.FindElement(By.CssSelector("td:nth-child(4)")).Text;
-                var interestDate = row.FindElement(By.CssSelector("td:nth-child(5)")).Text;
-                var payee = row.FindElement(By.CssSelector("td:nth-child(6)")).Text;
-                var batchAmount = row.FindElement(By.CssSelector("td:nth-child(7)")).Text;
+                System.IO.Directory.CreateDirectory(directoryPath);
+            }
 
-                // Save Data to Database 
-                SaveToDatabase(new PaymentData
+            // Full path to the Excel file
+            string filePath = System.IO.Path.Combine(directoryPath, "PaymentHistory.xlsx");
+
+            // Create a new Excel workbook
+            using (var workbook = new XLWorkbook())
+            {
+                // Add a worksheet to the workbook
+                var worksheet = workbook.Worksheets.Add("PaymentHistory");
+
+                // Add headers to the worksheet
+                worksheet.Cell(1, 1).Value = "Parcel ID";
+                worksheet.Cell(1, 2).Value = "Last Payment Amount";
+                worksheet.Cell(1, 3).Value = "Last Payment Date";
+                worksheet.Cell(1, 4).Value = "Fiscal Tax Year Payments";
+                worksheet.Cell(1, 5).Value = "Prior Calendar Year Payments";
+                worksheet.Cell(1, 6).Value = "Current Calendar Year Payments";
+
+                // Add data to the worksheet
+                for (int i = 0; i < payments.Count; i++)
                 {
-                    ParcelNumber = parcelNumber,
-                    BatchNumber = batchNumber,
-                    PaymentDate = paymentDate,
-                    InterestDate = interestDate,
-                    Payee = payee,
-                    BatchAmount = batchAmount
-                });
+                    worksheet.Cell(i + 2, 1).Value = payments[i].ParcelID;
+                    worksheet.Cell(i + 2, 2).Value = payments[i].LastPaymentAmount;
+                    worksheet.Cell(i + 2, 3).Value = payments[i].LastPaymentDate; ;
+                    worksheet.Cell(i + 2, 4).Value = payments[i].FiscalTaxYearPayments;
+                    worksheet.Cell(i + 2, 5).Value = payments[i].PriorCalendarYearPayments;
+                    worksheet.Cell(i + 2, 6).Value = payments[i].CurrentCalendarYearPayments;
+                }
+
+                // Save the workbook to the specified file path
+                workbook.SaveAs(filePath);
             }
+
+            Console.WriteLine($"Data has been successfully saved to {filePath}");
+        }
+        //-------------------------------------------
+
+
+
+
+        // Extract data from Excel
+
+        public static List<ParcelRecord> ReadParcelData(string filePath)
+        {
+            var parcelRecords = new List<ParcelRecord>();
+
+            using (var workbook = new XLWorkbook(filePath))
+            {
+                var worksheet = workbook.Worksheet(1);
+                var rows = worksheet.RangeUsed().RowsUsed().Skip(1);
+
+                foreach (var row in rows)
+                {
+                    var parcelRecord = new ParcelRecord
+                    {
+                        ParcelNumber = row.Cell(1).GetString(),  // A column
+                        ParNum = row.Cell(2).GetString(),        // B column
+                        DocName = row.Cell(3).GetString(),       // C column
+                        DocName1 = row.Cell(4).GetString(),      // D column
+                        Stat = row.Cell(5).GetString(),          // E column
+                        Rem = row.Cell(6).GetString()            // F column
+                    };
+
+                    parcelRecords.Add(parcelRecord);
+                }
+            }
+
+            return parcelRecords;
         }
 
 
-        public static async Task SavePageAsPdf(string url, string parcelNumber)
+
+
+        public static async Task SavePageAsPdf(string parcelNumber, string docName)
         {
+
+            string url = $"https://trweb.co.clark.nv.us/print_wep2.asp?Parcel={parcelNumber}";
+
             // Define the path where PDFs should be saved
             string pdfDirectory = @"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\pdfs";
 
@@ -218,7 +274,7 @@ namespace ExtractExcelData
             }
 
             // Generate a file name based on the parcel number
-            string pdfFilePath = Path.Combine(pdfDirectory, $"{parcelNumber}_payment_history.pdf");
+            string pdfFilePath = Path.Combine(pdfDirectory, $"{docName}.pdf");
 
             // Set the path to your Chrome or Chromium installation
             var launchOptions = new LaunchOptions
@@ -274,177 +330,5 @@ namespace ExtractExcelData
                 }
             }
         }
-
-
-
-        // Save data to excel
-        static void SaveToExcel(List<PaymentData> payments)
-        {
-            // Specify the directory where you want to save the Excel file
-            string directoryPath = @"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\Excel";
-
-            // Ensure the directory exists, if not, create it
-            if (!System.IO.Directory.Exists(directoryPath))
-            {
-                System.IO.Directory.CreateDirectory(directoryPath);
-            }
-
-            // Full path to the Excel file
-            string filePath = System.IO.Path.Combine(directoryPath, "Payments.xlsx");
-
-            // Create a new Excel workbook
-            using (var workbook = new XLWorkbook())
-            {
-                // Add a worksheet to the workbook
-                var worksheet = workbook.Worksheets.Add("Payments");
-
-                // Add headers to the worksheet
-
-                worksheet.Cell(1, 1).Value = "Parcel Number";
-                worksheet.Cell(1, 2).Value = "Batch #";
-                worksheet.Cell(1, 3).Value = "Payment Date";
-                worksheet.Cell(1, 4).Value = "Interest Date";
-                //worksheet.Cell(1, 4).Value = "Payee";
-                worksheet.Cell(1, 5).Value = "Batch Amount";
-
-                // Add data to the worksheet
-                for (int i = 0; i < payments.Count; i++)
-                {
-                    worksheet.Cell(i + 2, 1).Value = payments[i].ParcelNumber;
-                    worksheet.Cell(i + 2, 2).Value = payments[i].BatchNumber;
-                    worksheet.Cell(i + 2, 3).Value = payments[i].PaymentDate;
-                    worksheet.Cell(i + 2, 4).Value = payments[i].InterestDate;
-                    //worksheet.Cell(i + 2, 4).Value = payments[i].Payee;
-                    worksheet.Cell(i + 2, 5).Value = payments[i].BatchAmount;
-                }
-
-                // Save the workbook to the specified file path
-                workbook.SaveAs(filePath);
-            }
-
-            Console.WriteLine($"Data has been successfully saved to {filePath}");
-        }
-
-
-        // Extract rows from web link
-        public static List<PaymentData> ExtractData(IWebDriver driver, string parcelNumber)
-        {
-            // Find the table rows
-            //var rows = driver.FindElements(By.CssSelector("tbody tr"));//k-master-row
-
-            var rows = driver.FindElements(By.ClassName("k-master-row"));
-
-            // Create a list to hold the extracted data
-            List<PaymentData> payments = new List<PaymentData>();
-
-            foreach (var row in rows)
-            {
-                // Extract the relevant data from each cell
-                var batchNumber = row.FindElement(By.CssSelector("td:nth-child(3)")).Text;
-                var paymentDate = row.FindElement(By.CssSelector("td:nth-child(4)")).Text;
-                var interestDate = row.FindElement(By.CssSelector("td:nth-child(5)")).Text;
-                var payee = row.FindElement(By.CssSelector("td:nth-child(6)")).Text;
-                var batchAmount = row.FindElement(By.CssSelector("td:nth-child(7)")).Text;
-
-                // Add the extracted data to the list
-                payments.Add(new PaymentData
-                {
-                    ParcelNumber = parcelNumber,
-                    BatchNumber = batchNumber,
-                    PaymentDate = paymentDate,
-                    InterestDate = interestDate,
-                    Payee = payee,
-                    BatchAmount = batchAmount
-                });
-            }
-
-
-            return payments;
-        }
-
-
-        // Save Data to Database 
-        public static void SaveToDatabase(PaymentData payment)
-        {
-            // Connection string to your SQL Server database
-            string connectionString = "Data Source=LAPTOP-S2EFS1EF\\SQLEXPRESS;Initial Catalog=ParcelDB;Integrated Security=true";
-
-            using (SqlConnection connection = new SqlConnection(connectionString))
-            {
-                connection.Open();
-
-
-                // SQL query to insert data
-                string query = "INSERT INTO PaymentHistory (ParcelNumber, BatchNumber, PaymentDate, InterestDate, BatchAmount) " +
-                               "VALUES (@ParcelNumber, @BatchNumber, @PaymentDate, @InterestDate, @BatchAmount)";
-
-                using (SqlCommand command = new SqlCommand(query, connection))
-                {
-                    // Add parameters to the command
-                    command.Parameters.AddWithValue("@ParcelNumber", payment.ParcelNumber);
-                    command.Parameters.AddWithValue("@BatchNumber", payment.BatchNumber);
-                    command.Parameters.AddWithValue("@PaymentDate", payment.PaymentDate);
-                    command.Parameters.AddWithValue("@InterestDate", payment.InterestDate);
-                    command.Parameters.AddWithValue("@BatchAmount", payment.BatchAmount);
-
-                    // Execute the query
-                    command.ExecuteNonQuery();
-                }
-
-
-                Console.WriteLine("Data has been successfully saved to the database.");
-            }
-        }
-
-
-        // Retrieve Data From Database
-        public static List<PaymentData> RetrieveFromDatabase()
-        {
-            // Connection string to your SQL Server database
-            string connectionString = "Data Source=LAPTOP-S2EFS1EF\\SQLEXPRESS;Initial Catalog=ParcelDB;Integrated Security=true";
-
-            // List to hold the retrieved data
-            List<PaymentData> payments = new List<PaymentData>();
-
-            using (SqlConnection connection = new SqlConnection(connectionString))
-            {
-                connection.Open();
-
-                // SQL query to retrieve data
-                string query = "SELECT ParcelNumber, BatchNumber, PaymentDate, InterestDate, BatchAmount FROM PaymentHistory";
-
-                using (SqlCommand command = new SqlCommand(query, connection))
-                {
-                    using (SqlDataReader reader = command.ExecuteReader())
-                    {
-                        while (reader.Read())
-                        {
-                            // Retrieve each column's value
-                            string parcelNumber = reader["ParcelNumber"].ToString();
-                            string batchNumber = reader["BatchNumber"].ToString();
-                            string paymentDate = reader["PaymentDate"].ToString();
-                            string interestDate = reader["InterestDate"].ToString();
-                            string batchAmount = reader["BatchAmount"].ToString();
-
-                            // Add the retrieved data to the list
-                            payments.Add(new PaymentData
-                            {
-                                ParcelNumber = parcelNumber,
-                                BatchNumber = batchNumber,
-                                PaymentDate = paymentDate,
-                                InterestDate = interestDate,
-                                BatchAmount = batchAmount
-                            });
-                        }
-                    }
-                }
-            }
-
-            return payments;
-        }
     }
-
-
-
-
 }
