@@ -9,6 +9,9 @@ namespace ExtractExcelData
     public class PaymentHistory
     {
         public string ParcelID { get; set; }
+        public string ParNum { get; set; }
+        public string DocName { get; set; }
+        public string DocName1 { get; set; }
         public string LastPaymentAmount { get; set; }
         public string LastPaymentDate { get; set; }
         public string FiscalTaxYearPayments { get; set; }

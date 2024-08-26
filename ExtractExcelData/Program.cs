@@ -1,22 +1,15 @@
-﻿using OfficeOpenXml;
-using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Support.UI;
+﻿using ClosedXML.Excel;
+using ExtractExcelData.Models;
 using OpenQA.Selenium;
-using SeleniumExtras.WaitHelpers;
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Data.SqlClient;
-using System.IO;
-using ClosedXML.Excel;
-using DocumentFormat.OpenXml.Bibliography;
-using Irony.Parsing;
-using System.Threading.Tasks;
+using OpenQA.Selenium.Chrome;
 using PuppeteerSharp;
 using PuppeteerSharp.Media;
-using DinkToPdf;
-using ExtractExcelData.Models;
+using System;
+using System.Collections.Generic;
+using System.Data.SqlClient;
+using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace ExtractExcelData
 {
@@ -36,7 +29,7 @@ namespace ExtractExcelData
             foreach (var parcelRecord in parcelRecords)
             {
                 Console.WriteLine($"------------------- Scrapping start for parcel number - {parcelRecord.ParcelNumber}  ----------------");
-                WebScrapper(parcelRecord.ParcelNumber);
+                WebScrapper(parcelRecord);
                 Console.WriteLine($"-------------------  Scrapping end for parcel number - {parcelRecord.ParcelNumber}  ----------------");
 
                 Console.WriteLine("Save page as pdf started...");
@@ -65,7 +58,7 @@ namespace ExtractExcelData
         //---------------------------------------------------------------
 
 
-        public static void WebScrapper(string parcelNumber)
+        public static void WebScrapper(ParcelRecord parcelRecord)
         {
 
             // Initialize ChromeDriver
@@ -78,7 +71,7 @@ namespace ExtractExcelData
 
                 // Enter Parcel ID
                 var parcelInput = driver.FindElement(By.XPath(@"/html/body/div[1]/center/table/tbody/tr[2]/td[2]/table[3]/tbody/tr[2]/td/table/tbody/tr[1]/td[1]/form/table/tbody/tr[1]/td[1]/table/tbody/tr/td[2]/input"));
-                parcelInput.SendKeys(parcelNumber);
+                parcelInput.SendKeys(parcelRecord.ParcelNumber);
 
                 // Submit the form
                 var submitButton = driver.FindElement(By.Name("Submit"));
@@ -97,7 +90,7 @@ namespace ExtractExcelData
 
 
                 // Save data to SQL Server
-                SaveDataToSql(parcelNumber, lastPaymentAmount, lastPaymentDate, fiscalTaxYearPayments, priorCalendarYearPayments, currentCalendarYearPayments);
+                SaveDataToSql(parcelRecord.ParcelNumber, parcelRecord.ParNum, parcelRecord.DocName, parcelRecord.DocName1, lastPaymentAmount, lastPaymentDate, fiscalTaxYearPayments, priorCalendarYearPayments, currentCalendarYearPayments);
 
                 Console.WriteLine("------------- Scrapping data saved to database -------------");
 
@@ -114,19 +107,32 @@ namespace ExtractExcelData
         }
 
 
-        static void SaveDataToSql(string parcelNumber, string lastPaymentAmount, string lastPaymentDate, string fiscalTaxYearPayments, string priorCalendarYearPayments, string currentCalendarYearPayments)
+        static void SaveDataToSql(string parcelNumber,string parNum,string docName,string docName1, string lastPaymentAmount, string lastPaymentDate, string fiscalTaxYearPayments, string priorCalendarYearPayments, string currentCalendarYearPayments)
         {
             string connectionString = "server=LAPTOP-S2EFS1EF\\SQLEXPRESS;database=ParcelDB;Integrated Security=true;";
             using (SqlConnection connection = new SqlConnection(connectionString))
             {
                 connection.Open();
 
-                string query = "INSERT INTO PaymentHistory1 (ParcelID,LastPaymentAmount, LastPaymentDate, FiscalTaxYearPayments, PriorCalendarYearPayments, CurrentCalendarYearPayments) " +
-                               "VALUES (@ParcelID,@LastPaymentAmount, @LastPaymentDate, @FiscalTaxYearPayments, @PriorCalendarYearPayments, @CurrentCalendarYearPayments)";
+                string query = "INSERT INTO PaymentHistory1 (ParcelID,ParNum,DocName,DocName1,LastPaymentAmount, LastPaymentDate, FiscalTaxYearPayments, PriorCalendarYearPayments, CurrentCalendarYearPayments) " +
+                               "VALUES " +
+                               "(@ParcelID," +
+                               "@ParNum," +
+                               "@DocName," +
+                               "@DocName1," +
+                               "@LastPaymentAmount," +
+                               " @LastPaymentDate," +
+                               " @FiscalTaxYearPayments," +
+                               " @PriorCalendarYearPayments," +
+                               " @CurrentCalendarYearPayments" +
+                               ")";
 
                 using (SqlCommand command = new SqlCommand(query, connection))
                 {
                     command.Parameters.AddWithValue("@ParcelID", parcelNumber);
+                    command.Parameters.AddWithValue("@ParNum", parNum);
+                    command.Parameters.AddWithValue("@DocName", docName);
+                    command.Parameters.AddWithValue("@DocName1", docName1);
                     command.Parameters.AddWithValue("@LastPaymentAmount", lastPaymentAmount);
                     command.Parameters.AddWithValue("@LastPaymentDate", lastPaymentDate);
                     command.Parameters.AddWithValue("@FiscalTaxYearPayments", fiscalTaxYearPayments);
@@ -160,6 +166,9 @@ namespace ExtractExcelData
                             var paymentHistory = new PaymentHistory
                             {
                                 ParcelID = reader["ParcelID"].ToString(),
+                                ParNum = reader["ParNum"].ToString(),
+                                DocName = reader["DocName"].ToString(),
+                                DocName1 = reader["DocName"].ToString(),
                                 LastPaymentAmount = reader["LastPaymentAmount"].ToString(),
                                 LastPaymentDate = reader["LastPaymentDate"].ToString(),
                                 FiscalTaxYearPayments = reader["FiscalTaxYearPayments"].ToString(),
@@ -197,22 +206,28 @@ namespace ExtractExcelData
                 var worksheet = workbook.Worksheets.Add("PaymentHistory");
 
                 // Add headers to the worksheet
-                worksheet.Cell(1, 1).Value = "Parcel ID";
-                worksheet.Cell(1, 2).Value = "Last Payment Amount";
-                worksheet.Cell(1, 3).Value = "Last Payment Date";
-                worksheet.Cell(1, 4).Value = "Fiscal Tax Year Payments";
-                worksheet.Cell(1, 5).Value = "Prior Calendar Year Payments";
-                worksheet.Cell(1, 6).Value = "Current Calendar Year Payments";
+                worksheet.Cell(1, 1).Value = "Parcel Number";
+                worksheet.Cell(1, 2).Value = "ParNum";
+                worksheet.Cell(1, 3).Value = "DocName";
+                worksheet.Cell(1, 4).Value = "DocName1";
+                worksheet.Cell(1, 5).Value = "Last Payment Amount";
+                worksheet.Cell(1, 6).Value = "Last Payment Date";
+                worksheet.Cell(1, 7).Value = "Fiscal Tax Year Payments";
+                worksheet.Cell(1, 8).Value = "Prior Calendar Year Payments";
+                worksheet.Cell(1, 9).Value = "Current Calendar Year Payments";
 
                 // Add data to the worksheet
                 for (int i = 0; i < payments.Count; i++)
                 {
                     worksheet.Cell(i + 2, 1).Value = payments[i].ParcelID;
-                    worksheet.Cell(i + 2, 2).Value = payments[i].LastPaymentAmount;
-                    worksheet.Cell(i + 2, 3).Value = payments[i].LastPaymentDate; ;
-                    worksheet.Cell(i + 2, 4).Value = payments[i].FiscalTaxYearPayments;
-                    worksheet.Cell(i + 2, 5).Value = payments[i].PriorCalendarYearPayments;
-                    worksheet.Cell(i + 2, 6).Value = payments[i].CurrentCalendarYearPayments;
+                    worksheet.Cell(i + 2, 2).Value = payments[i].ParNum;
+                    worksheet.Cell(i + 2, 3).Value = payments[i].DocName;
+                    worksheet.Cell(i + 2, 4).Value = payments[i].DocName1;
+                    worksheet.Cell(i + 2, 5).Value = payments[i].LastPaymentAmount;
+                    worksheet.Cell(i + 2, 6).Value = payments[i].LastPaymentDate; ;
+                    worksheet.Cell(i + 2, 7).Value = payments[i].FiscalTaxYearPayments;
+                    worksheet.Cell(i + 2, 8).Value = payments[i].PriorCalendarYearPayments;
+                    worksheet.Cell(i + 2, 9).Value = payments[i].CurrentCalendarYearPayments;
                 }
 
                 // Save the workbook to the specified file path
