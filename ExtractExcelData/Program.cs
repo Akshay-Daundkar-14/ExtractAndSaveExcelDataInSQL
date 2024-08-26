@@ -15,6 +15,51 @@ namespace ExtractExcelData
 {
     internal class Program
     {
+        //static void Main(string[] args)
+        //{
+        //    Console.WriteLine("------------------- Start ----------------");
+
+        //    // Read Excel Data
+        //    Console.WriteLine("Reading records from excel started...");
+        //    string filePath = @"D:\Temp\Akshay\ExtractDataFromExcel\ExtractExcelData\Excel\Input\ParcelData.xlsx";
+        //    var parcelRecords = ReadParcelData(filePath);
+        //    Console.WriteLine("Reading records from excel ends...");
+
+
+        //    foreach (var parcelRecord in parcelRecords)
+        //    {
+
+        //        Console.WriteLine($"------------------- Scrapping start for parcel number - {parcelRecord.ParcelNumber}  ----------------");
+        //        WebScrapper(parcelRecord);
+        //        Console.WriteLine($"-------------------  Scrapping end for parcel number - {parcelRecord.ParcelNumber}  ----------------");
+
+        //        Console.WriteLine("Save page as pdf started...");
+        //        SavePageAsPdf(parcelRecord.ParcelNumber, parcelRecord.DocName);
+        //        Console.WriteLine("Save page as pdf ends...");
+
+        //    }
+
+
+
+
+        //    // Save Output data to excel
+        //    Console.WriteLine("Getting Payment Histories started...");
+        //    var paymentHistories = GetAllPaymentHistories();
+        //    Console.WriteLine("Getting Payment Histories ends...");
+
+
+        //    Console.WriteLine("------------------- Saving Output data to excel stared ----------------");
+        //    SaveToExcel(paymentHistories);
+        //    Console.WriteLine("------------------- Saving Output data to excel ends ----------------");
+
+        //    Console.WriteLine("------------------- End ----------------");
+
+        //    Console.ReadLine();
+        //}
+
+        //---------------------------------------------------------------
+
+
         static void Main(string[] args)
         {
             Console.WriteLine("------------------- Start ----------------");
@@ -25,38 +70,54 @@ namespace ExtractExcelData
             var parcelRecords = ReadParcelData(filePath);
             Console.WriteLine("Reading records from excel ends...");
 
-
             foreach (var parcelRecord in parcelRecords)
             {
-                Console.WriteLine($"------------------- Scrapping start for parcel number - {parcelRecord.ParcelNumber}  ----------------");
-                WebScrapper(parcelRecord);
-                Console.WriteLine($"-------------------  Scrapping end for parcel number - {parcelRecord.ParcelNumber}  ----------------");
+                DateTime startTime = DateTime.Now;
+                parcelRecord.StartTime = startTime.ToString("yyyy-MM-dd HH:mm:ss");
 
-                Console.WriteLine("Save page as pdf started...");
-                SavePageAsPdf(parcelRecord.ParcelNumber, parcelRecord.DocName);
-                Console.WriteLine("Save page as pdf ends...");
+                try
+                {
+                    Console.WriteLine($"------------------- Scrapping start for parcel number - {parcelRecord.ParcelNumber}  ----------------");
+                    WebScrapper(parcelRecord);
+                    Console.WriteLine($"-------------------  Scrapping end for parcel number - {parcelRecord.ParcelNumber}  ----------------");
+
+                    Console.WriteLine("Save page as pdf started...");
+                    SavePageAsPdf(parcelRecord.ParcelNumber, parcelRecord.DocName).Wait();
+                    Console.WriteLine("Save page as pdf ends...");
+
+                    parcelRecord.Status = "Success";
+                }
+                catch (Exception ex)
+                {
+                    parcelRecord.Status = "Failure";
+                    parcelRecord.Remark = $"System Exception: {ex.Message}";
+                }
+                finally
+                {
+                    DateTime endTime = DateTime.Now;
+                    parcelRecord.EndTime = endTime.ToString("yyyy-MM-dd HH:mm:ss");
+                    parcelRecord.TotalTime = (endTime - startTime).TotalSeconds.ToString("F2") + " seconds";
+                }
             }
 
-
-
+            // Save the updated parcel records back to the Excel file
+            Console.WriteLine("Saving updated records to excel started...");
+            UpdateParcelData(filePath, parcelRecords);
+            Console.WriteLine("Saving updated records to excel ended...");
 
             // Save Output data to excel
             Console.WriteLine("Getting Payment Histories started...");
             var paymentHistories = GetAllPaymentHistories();
             Console.WriteLine("Getting Payment Histories ends...");
 
-
-            Console.WriteLine("------------------- Saving Output data to excel stared ----------------");
+            Console.WriteLine("------------------- Saving Output data to excel started ----------------");
             SaveToExcel(paymentHistories);
-            Console.WriteLine("------------------- Saving Output data to excel ends ----------------");
+            Console.WriteLine("------------------- Saving Output data to excel ended ----------------");
 
             Console.WriteLine("------------------- End ----------------");
 
             Console.ReadLine();
         }
-
-        //---------------------------------------------------------------
-
 
         public static void WebScrapper(ParcelRecord parcelRecord)
         {
@@ -243,7 +304,7 @@ namespace ExtractExcelData
 
         // Extract data from Excel
 
-        public static List<ParcelRecord> ReadParcelData(string filePath)
+        public static List<ParcelRecord> ReadParcelData1(string filePath)
         {
             var parcelRecords = new List<ParcelRecord>();
 
@@ -260,8 +321,8 @@ namespace ExtractExcelData
                         ParNum = row.Cell(2).GetString(),        // B column
                         DocName = row.Cell(3).GetString(),       // C column
                         DocName1 = row.Cell(4).GetString(),      // D column
-                        Stat = row.Cell(5).GetString(),          // E column
-                        Rem = row.Cell(6).GetString()            // F column
+                        Status = row.Cell(5).GetString(),          // E column
+                        Remark = row.Cell(6).GetString()            // F column
                     };
 
                     parcelRecords.Add(parcelRecord);
@@ -344,6 +405,66 @@ namespace ExtractExcelData
                     await browser.CloseAsync();
                 }
             }
+        }
+
+
+        // Update the parcel records in the Excel file
+        public static void UpdateParcelData(string filePath, List<ParcelRecord> parcelRecords)
+        {
+            using (var workbook = new XLWorkbook(filePath))
+            {
+                var worksheet = workbook.Worksheet(1);
+                var rows = worksheet.RangeUsed().RowsUsed().Skip(1);
+
+                int rowIndex = 2;
+                foreach (var row in rows)
+                {
+                    var parcelRecord = parcelRecords[rowIndex - 2];
+
+                    row.Cell(5).Value = parcelRecord.Status;
+                    row.Cell(6).Value = parcelRecord.Remark;    
+                    row.Cell(7).Value = parcelRecord.StartTime;   
+                    row.Cell(8).Value = parcelRecord.EndTime;   
+                    row.Cell(9).Value = parcelRecord.TotalTime;  
+                          
+
+                    rowIndex++;
+                }
+
+                workbook.Save();
+            }
+        }
+
+
+        public static List<ParcelRecord> ReadParcelData(string filePath)
+        {
+            var parcelRecords = new List<ParcelRecord>();
+
+            using (var workbook = new XLWorkbook(filePath))
+            {
+                var worksheet = workbook.Worksheet(1);
+                var rows = worksheet.RangeUsed().RowsUsed().Skip(1);
+
+                foreach (var row in rows)
+                {
+                    var parcelRecord = new ParcelRecord
+                    {
+                        ParcelNumber = row.Cell(1).GetString(),  // A column
+                        ParNum = row.Cell(2).GetString(),        // B column
+                        DocName = row.Cell(3).GetString(),       // C column
+                        DocName1 = row.Cell(4).GetString(),      // D column
+                        Status = row.Cell(5).GetString(),        // E column
+                        StartTime = row.Cell(6).GetString(),     // F column
+                        EndTime = row.Cell(7).GetString(),       // G column
+                        TotalTime = row.Cell(8).GetString(),     // H column
+                        Remark = row.Cell(9).GetString()            // I column
+                    };
+
+                    parcelRecords.Add(parcelRecord);
+                }
+            }
+
+            return parcelRecords;
         }
     }
 }
