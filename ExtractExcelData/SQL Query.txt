@@ -3,21 +3,28 @@
 Use ParcelDB
 
 
-CREATE TABLE PaymentHistory1 (
-    ID INT IDENTITY(1,1) PRIMARY KEY, 
-    ParcelID VARCHAR(20),            
-    LastPaymentAmount VARCHAR(20),
-    LastPaymentDate VARCHAR(20),        
-    FiscalTaxYearPayments VARCHAR(20),
-    PriorCalendarYearPayments VARCHAR(20), 
-    CurrentCalendarYearPayments VARCHAR(20), 
-);
 
-SELECT TOP (1000) [ID]
-      ,[ParcelID]
-      ,[LastPaymentAmount]
-      ,[LastPaymentDate]
-      ,[FiscalTaxYearPayments]
-      ,[PriorCalendarYearPayments]
-      ,[CurrentCalendarYearPayments]
-  FROM [ParcelDB].[dbo].[PaymentHistory1]
+
+
+
+  Drop table [PaymentHistory1]
+
+  CREATE TABLE [dbo].[PaymentHistory1](
+	[ID] [int] IDENTITY(1,1) NOT NULL,
+	[ParcelID] [varchar](50) NULL,
+	[ParNum] [varchar](50) NULL,
+	[DocName] [varchar](50) NULL,
+	[DocName1] [varchar](50) NULL,
+	[LastPaymentAmount] [varchar](50) NULL,
+	[LastPaymentDate] [varchar](50) NULL,
+	[FiscalTaxYearPayments] [varchar](50) NULL,
+	[PriorCalendarYearPayments] [varchar](50) NULL,
+	[CurrentCalendarYearPayments] [varchar](50) NULL,
+PRIMARY KEY CLUSTERED 
+(
+	[ID] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, OPTIMIZE_FOR_SEQUENTIAL_KEY = OFF) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+
